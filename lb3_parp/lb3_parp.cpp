@@ -152,18 +152,58 @@ DWORD WINAPI calculate_pi_bbpi_parallel(LPVOID param) {
         k++;
     }
 }
+double calculate_pi_bbpi_parallel_omp(double precision, int& iterations) {
+    double pi_estimate = 0.0;
+    const int max_iterations = 1000000;
 
-void task6() {
+#pragma omp parallel
+    {
+        double local_sum = 0.0;
+        int local_iterations = 0;
+
+#pragma omp for
+        for (int k = 0; k < max_iterations; ++k) {
+            double term = (1.0 / std::pow(16, k)) *
+                (4.0 / (8 * k + 1) - 2.0 / (8 * k + 4) -
+                    1.0 / (8 * k + 5) - 1.0 / (8 * k + 6));
+            local_sum += term;
+            local_iterations++;
+
+            if (std::abs(local_sum - 3.141592653589793) < precision) {
+                break;
+            }
+        }
+
+#pragma omp critical
+        {
+            pi_estimate += local_sum;
+            iterations += local_iterations;
+        }
+    }
+    return pi_estimate;
+}
+
+void task6_9() {
     double precision = 1e-10;
-    const int num_threads = 4;
-    HANDLE threads[num_threads];
-    ThreadData thread_data[num_threads];
+    int iterations_seq = 0, iterations_win = 0, iterations_omp = 0;
 
     LARGE_INTEGER frequency, start, end;
     QueryPerformanceFrequency(&frequency);
 
     QueryPerformanceCounter(&start);
+    double pi_seq = calculate_pi_bbpi_parallel_omp(precision, iterations_seq);
+    QueryPerformanceCounter(&end);
+    double time_seq = static_cast<double>(end.QuadPart - start.QuadPart) / frequency.QuadPart;
 
+    std::cout << "Sequential (reference) execution: " << std::fixed << std::setprecision(10)
+        << pi_seq << " (iterations: " << iterations_seq << ")\n";
+    std::cout << "Sequential execution time: " << time_seq << " seconds\n";
+
+    const int num_threads = 4;
+    HANDLE threads[num_threads];
+    ThreadData thread_data[num_threads];
+
+    QueryPerformanceCounter(&start);
     for (int i = 0; i < num_threads; i++) {
         thread_data[i].precision = precision;
         threads[i] = CreateThread(NULL, 0, calculate_pi_bbpi_parallel, &thread_data[i], 0, NULL);
@@ -174,29 +214,46 @@ void task6() {
         CloseHandle(threads[i]);
     }
 
-    double pi_parallel = 0.0;
-    int total_iterations = 0;
-
+    double pi_win = 0.0;
     for (int i = 0; i < num_threads; i++) {
-        pi_parallel += thread_data[i].pi_estimate; 
-        total_iterations += thread_data[i].iterations; 
+        pi_win += thread_data[i].pi_estimate;
+        iterations_win += thread_data[i].iterations;
     }
-
-    pi_parallel /= num_threads; 
+    pi_win /= num_threads;
 
     QueryPerformanceCounter(&end);
-    double parallel_time = static_cast<double>(end.QuadPart - start.QuadPart) / frequency.QuadPart;
+    double time_win = static_cast<double>(end.QuadPart - start.QuadPart) / frequency.QuadPart;
 
-    std::cout << "\nBailey-Borwein-Plouffe (parallel): " << std::fixed << std::setprecision(10) << pi_parallel << std::endl;
-    std::cout << "Total iterations in parallel: " << total_iterations << std::endl;
-    std::cout << "Parallel execution time: " << parallel_time << " seconds\n";
+    std::cout << "Windows Threads execution: " << pi_win << " (iterations: " << iterations_win << ")\n";
+    std::cout << "Windows Threads execution time: " << time_win << " seconds\n";
+
+    QueryPerformanceCounter(&start);
+    double pi_omp = calculate_pi_bbpi_parallel_omp(precision, iterations_omp);
+    QueryPerformanceCounter(&end);
+    double time_omp = static_cast<double>(end.QuadPart - start.QuadPart) / frequency.QuadPart;
+
+    std::cout << "OpenMP execution: " << pi_omp << " (iterations: " << iterations_omp << ")\n";
+    std::cout << "OpenMP execution time: " << time_omp << " seconds\n";
+
+    double speedup_win = time_seq / time_win;
+    double speedup_omp = time_seq / time_omp;
+
+    std::cout << "\nSpeedup comparison:\n";
+    std::cout << "Windows Threads speedup: " << speedup_win << "\n";
+    std::cout << "OpenMP speedup: " << speedup_omp << "\n";
+
+    if (speedup_win > speedup_omp) {
+        std::cout << "Windows Threads provided better speedup.\n";
+    }
+    else {
+        std::cout << "OpenMP provided better speedup.\n";
+    }
 }
 
 int main() {
     task1();
     task2();
     task3_4_5();
-    task6();
-
+    task6_9();
     return 0;
 }
